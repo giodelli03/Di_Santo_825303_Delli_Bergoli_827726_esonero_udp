@@ -26,6 +26,9 @@
 
 #define NO_ERROR 0
 
+#define ECHOMAX 255
+#define PORT 48000
+
 void clearwinsock() {
 #if defined WIN32
 	WSACleanup();
@@ -47,16 +50,40 @@ int main(int argc, char *argv[]) {
 #endif
 
 	int my_socket;
+	struct sockaddr_in echoServAddr;
+	struct sockaddr_in echoClntAddr;
+	unsigned int cliAddrLen;
+	char echoBuffer[ECHOMAX];
+	int recvMsgSize;
 
-	// TODO: Create UDP socket
+	//CREAZIONE SOCKET
+	if ((my_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) ErrorHandler("socket() fallita");
 
-	// TODO: Configure server address
-	
-	// TODO: Bind socket
+	// COSTRUZIONE DELL'INDIRIZZO DEL SERVER
+	memset(&echoServAddr, 0, sizeof(echoServAddr));
+	echoServAddr.sin_family = AF_INET; echoServAddr.sin_port = htons(PORT);
+	echoServAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+	// BIND DELLA SOCKET
+	if ((bind(my_socket, (struct sockaddr *)&echoServAddr, sizeof(echoServAddr))) < 0)
+		ErrorHandler("bind() fallita");
+
+	// RICEZIONE DELLA STRINGA ECHO DAL CLIENT
+	while (1) {
+	    cliAddrLen = sizeof(echoClntAddr);
+
+	    recvMsgSize = recvfrom(my_socket, echoBuffer, ECHOMAX, 0,
+	                           (struct sockaddr*)&echoClntAddr, &cliAddrLen);
+
+	    if (recvMsgSize == -1) {
+	        perror("recvfrom error");
+	        continue;
+	    }
+	}
 
 	// TODO: Implement UDP datagram reception loop 
 
-	printf("Server terminated.\n");
+	printf("Server terminato.\n");
 
 	closesocket(my_socket);
 	clearwinsock();
