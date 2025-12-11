@@ -26,6 +26,11 @@
 #include <time.h>
 #include "protocol.h"
 
+void ErrorHandler(const char *errorMessage) {
+	fprintf(stderr, "%s\n", errorMessage);
+	exit(1);
+}
+
 #define NO_ERROR 0
 
 #define ECHOMAX 255
@@ -85,6 +90,28 @@ int main(int argc, char *argv[]) {
 				return 1;
 		}
 		return 0;
+	}
+
+	/* Return canonical capitalization for a known city (or input if not found) */
+	static const char *get_canonical_city(const char *city)
+	{
+		if (!city) return city;
+		const char *valid_cities[] = {"Bari", "Roma", "Milano", "Napoli", "Torino",
+									  "Palermo", "Genova", "Bologna", "Firenze", "Venezia"};
+		const int n = (int)(sizeof(valid_cities) / sizeof(valid_cities[0]));
+		for (int i = 0; i < n; ++i) {
+			const char *a = city;
+			const char *b = valid_cities[i];
+			int equal = 1;
+			while (*a && *b) {
+				char ca = *a >= 'A' && *a <= 'Z' ? *a + ('a' - 'A') : *a;
+				char cb = *b >= 'A' && *b <= 'Z' ? *b + ('a' - 'A') : *b;
+				if (ca != cb) { equal = 0; break; }
+				a++; b++;
+			}
+			if (equal && *a == '\0' && *b == '\0') return valid_cities[i];
+		}
+		return city;
 	}
 
 	/*
@@ -169,28 +196,36 @@ int main(int argc, char *argv[]) {
 	int main(int argc, char *argv[])
 	{
 
-		/* Allow optional command line: ./server-project [-p port]
-		   -p port : optional port to listen on (overrides SERVER_PORT)
+		/* Parse command line options:
+		   -s <server> : server hostname or IP (optional, default "localhost")
+		   -r "request": request string like "t Bari" (optional - if present send once and exit)
 		*/
-		int listen_port = SERVER_PORT;
-		for (int i = 1; i < argc; ++i)
-		{
-			if (strcmp(argv[i], "-p") == 0)
-			{
-				if (i + 1 < argc)
-				{
-					listen_port = atoi(argv[++i]);
-					if (listen_port <= 0 || listen_port > 65535)
-					{
-						fprintf(stderr, "Invalid port: %s\n", argv[i]);
-						return 1;
-					}
+		char server_spec[128];
+		strncpy(server_spec, "localhost", sizeof(server_spec));
+		server_spec[sizeof(server_spec)-1] = '\0';
+		char cli_request[256] = "";
+		int have_cli_request = 0;
+
+		for (int i = 1; i < argc; ++i) {
+			if (strcmp(argv[i], "-s") == 0) {
+				if (i + 1 < argc) {
+					strncpy(server_spec, argv[++i], sizeof(server_spec)-1);
+					server_spec[sizeof(server_spec)-1] = '\0';
 					continue;
 				}
-				fprintf(stderr, "Missing value for -p\n");
+				fprintf(stderr, "Missing value for -s\n");
 				return 1;
 			}
-			/* ignore unknown arguments */
+			if (strcmp(argv[i], "-r") == 0) {
+				if (i + 1 < argc) {
+					strncpy(cli_request, argv[++i], sizeof(cli_request)-1);
+					cli_request[sizeof(cli_request)-1] = '\0';
+					have_cli_request = 1;
+					continue;
+				}
+				fprintf(stderr, "Missing value for -r\n");
+				return 1;
+			}
 		}
 
 
@@ -211,18 +246,190 @@ int main(int argc, char *argv[]) {
 	// CREAZIONE DELLA SOCKET
 	if ((my_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 		ErrorHandler("socket() failed");
-	// COSTRUZIONE DELL'INDIRIZZO DEL SERVER
-	memset(&echoServAddr, 0, sizeof(echoServAddr));
-	echoServAddr.sin_family = PF_INET; echoServAddr.sin_port = htons(PORT);
-	echoServAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-	// TODO: Create UDP socket
 
-	// TODO: Configure server address
+	// Risolvi server_spec -> indirizzo IPv4 (forward lookup)
+	struct addrinfo hints;
+	struct addrinfo *res = NULL;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET; /* IPv4 only */
+	hints.ai_socktype = SOCK_DGRAM;
 
-	// TODO: Implement UDP communication logic
+	int gai = getaddrinfo(server_spec, NULL, &hints, &res);
+	if (gai != 0 || res == NULL) {
+		fprintf(stderr, "Errore risoluzione server '%s': %s\n", server_spec, gai_strerror(gai));
+		closesocket(my_socket);
+		return 1;
+	}
 
-	// TODO: Close socket
-	// closesocket(my_socket);
+	struct sockaddr_in serv_sockaddr;
+	memset(&serv_sockaddr, 0, sizeof(serv_sockaddr));
+	serv_sockaddr.sin_family = AF_INET;
+	serv_sockaddr.sin_port = htons(PORT);
+	serv_sockaddr.sin_addr = ((struct sockaddr_in*)res->ai_addr)->sin_addr; /* copy IPv4 address */
+
+	/* Obtain textual IP */
+	char ipstr[INET_ADDRSTRLEN];
+#if defined WIN32
+	strcpy(ipstr, inet_ntoa(serv_sockaddr.sin_addr));
+#else
+	inet_ntop(AF_INET, &serv_sockaddr.sin_addr, ipstr, sizeof(ipstr));
+#endif
+
+	/* Reverse lookup: get canonical name from IP */
+	char hostbuf[NI_MAXHOST];
+	int rv = getnameinfo((struct sockaddr *)&serv_sockaddr, sizeof(serv_sockaddr), hostbuf, sizeof(hostbuf), NULL, 0, 0);
+	char resolved_name[NI_MAXHOST];
+	if (rv == 0) {
+		strncpy(resolved_name, hostbuf, sizeof(resolved_name)-1);
+		resolved_name[sizeof(resolved_name)-1] = '\0';
+	} else {
+		/* fallback: use server_spec as name */
+		strncpy(resolved_name, server_spec, sizeof(resolved_name)-1);
+		resolved_name[sizeof(resolved_name)-1] = '\0';
+	}
+
+	freeaddrinfo(res);
+
+	// Buffers and server address length
+	char request_str[256];
+	char response_buffer[sizeof(uint32_t) + sizeof(char) + sizeof(float)];
+	int response_size;
+	struct sockaddr_in server_addr;
+	unsigned int server_addr_len = sizeof(server_addr);
+
+	// If CLI provided request (-r), send once and exit after printing
+	if (have_cli_request) {
+		strncpy(request_str, cli_request, sizeof(request_str)-1);
+		request_str[sizeof(request_str)-1] = '\0';
+
+		if (sendto(my_socket, request_str, (int)strlen(request_str), 0,
+				   (struct sockaddr *)&serv_sockaddr, sizeof(serv_sockaddr)) < 0) {
+			perror("sendto error");
+			closesocket(my_socket);
+			return 1;
+		}
+
+		response_size = recvfrom(my_socket, response_buffer, sizeof(response_buffer), 0,
+								 (struct sockaddr *)&server_addr, &server_addr_len);
+		if (response_size < 0) {
+			perror("recvfrom error");
+			closesocket(my_socket);
+			return 1;
+		}
+
+		// Deserialize
+		if (response_size >= (int)(sizeof(uint32_t)+sizeof(char)+sizeof(float))) {
+			int offset = 0;
+			uint32_t net_status; memcpy(&net_status, response_buffer + offset, sizeof(uint32_t));
+			uint32_t status = ntohl(net_status); offset += sizeof(uint32_t);
+			char type; memcpy(&type, response_buffer + offset, sizeof(char)); offset += sizeof(char);
+			uint32_t tmp; memcpy(&tmp, response_buffer + offset, sizeof(float)); tmp = ntohl(tmp);
+			float value; memcpy(&value, &tmp, sizeof(float));
+
+			weather_request_t req;
+			parse_weather_request(request_str, &req); // to get city (may return error but req.city filled)
+			const char *cityname = get_canonical_city(req.city);
+
+			// Print according to status and type with exact format
+			if (status == 0) {
+				switch (type) {
+					case 't':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Temperatura = %.1f°C\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'h':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Umidità = %.1f%%\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'w':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Vento = %.1f km/h\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'p':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Pressione = %.1f hPa\n", resolved_name, ipstr, cityname, value);
+						break;
+					default:
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Richiesta non valida\n", resolved_name, ipstr, cityname);
+				}
+			} else if (status == 1) {
+				printf("Ricevuto risultato dal server %s (ip %s). Città non disponibile\n", resolved_name, ipstr);
+			} else if (status == 2) {
+				printf("Ricevuto risultato dal server %s (ip %s). Richiesta non valida\n", resolved_name, ipstr);
+			} else {
+				printf("Ricevuto risultato dal server %s (ip %s). Richiesta non valida\n", resolved_name, ipstr);
+			}
+		} else {
+			fprintf(stderr, "Risposta di dimensione errata: %d bytes\n", response_size);
+		}
+
+		closesocket(my_socket);
+		clearwinsock();
+		return 0;
+	}
+
+	// Interactive loop (same behavior as previous, but now with resolved server name/ip)
+	while (1) {
+		printf("Inserisci richiesta meteo (es. 't Roma') o 'quit' per uscire: ");
+		if (fgets(request_str, sizeof(request_str), stdin) == NULL) break;
+
+		// Rimuovi newline
+		size_t len = strlen(request_str);
+		if (len > 0 && request_str[len-1] == '\n') request_str[len-1] = '\0';
+		if (strcmp(request_str, "quit") == 0) break;
+
+		if (sendto(my_socket, request_str, (int)strlen(request_str), 0,
+				   (struct sockaddr *)&serv_sockaddr, sizeof(serv_sockaddr)) < 0) {
+			perror("sendto error");
+			continue;
+		}
+
+		response_size = recvfrom(my_socket, response_buffer, sizeof(response_buffer), 0,
+								 (struct sockaddr *)&server_addr, &server_addr_len);
+		if (response_size < 0) {
+			perror("recvfrom error");
+			continue;
+		}
+
+		if (response_size >= (int)(sizeof(uint32_t)+sizeof(char)+sizeof(float))) {
+			int offset = 0;
+			uint32_t net_status; memcpy(&net_status, response_buffer + offset, sizeof(uint32_t));
+			uint32_t status = ntohl(net_status); offset += sizeof(uint32_t);
+			char type; memcpy(&type, response_buffer + offset, sizeof(char)); offset += sizeof(char);
+			uint32_t tmp; memcpy(&tmp, response_buffer + offset, sizeof(float)); tmp = ntohl(tmp);
+			float value; memcpy(&value, &tmp, sizeof(float));
+
+			weather_request_t req;
+			parse_weather_request(request_str, &req);
+			const char *cityname = get_canonical_city(req.city);
+
+			if (status == 0) {
+				switch (type) {
+					case 't':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Temperatura = %.1f°C\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'h':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Umidità = %.1f%%\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'w':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Vento = %.1f km/h\n", resolved_name, ipstr, cityname, value);
+						break;
+					case 'p':
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Pressione = %.1f hPa\n", resolved_name, ipstr, cityname, value);
+						break;
+					default:
+						printf("Ricevuto risultato dal server %s (ip %s). %s: Richiesta non valida\n", resolved_name, ipstr, cityname);
+				}
+			} else if (status == 1) {
+				printf("Ricevuto risultato dal server %s (ip %s). Città non disponibile\n", resolved_name, ipstr);
+			} else if (status == 2) {
+				printf("Ricevuto risultato dal server %s (ip %s). Richiesta non valida\n", resolved_name, ipstr);
+			} else {
+				printf("Ricevuto risultato dal server %s (ip %s). Richiesta non valida\n", resolved_name, ipstr);
+			}
+		} else {
+			fprintf(stderr, "Risposta di dimensione errata: %d bytes\n", response_size);
+		}
+	}
+
+	// Chiusura socket
+	closesocket(my_socket);
 
 	printf("Client terminated.\n");
 

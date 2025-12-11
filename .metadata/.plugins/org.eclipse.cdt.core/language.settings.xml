@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <plugin>
 	<extension point="org.eclipse.cdt.core.LanguageSettingsProvider">
-		<provider class="org.eclipse.cdt.managedbuilder.internal.language.settings.providers.GCCBuiltinSpecsDetectorMinGW" console="false" env-hash="-422368012818376853" id="org.eclipse.cdt.managedbuilder.core.GCCBuiltinSpecsDetectorMinGW" keep-relative-paths="false" name="CDT GCC Built-in Compiler Settings MinGW" parameter="${COMMAND} ${FLAGS} -E -P -v -dD &quot;${INPUTS}&quot;">
+		<provider class="org.eclipse.cdt.managedbuilder.internal.language.settings.providers.GCCBuiltinSpecsDetectorMinGW" console="false" env-hash="-42394681607884144" id="org.eclipse.cdt.managedbuilder.core.GCCBuiltinSpecsDetectorMinGW" keep-relative-paths="false" name="CDT GCC Built-in Compiler Settings MinGW" parameter="${COMMAND} ${FLAGS} -E -P -v -dD &quot;${INPUTS}&quot;">
 			<language-scope id="org.eclipse.cdt.core.gcc"/>
 			<language-scope id="org.eclipse.cdt.core.g++"/>
 			<language id="org.eclipse.cdt.core.gcc">
 				<entry kind="includePath" name="C:/Program Files/MinGW64/lib/gcc/x86_64-w64-mingw32/8.1.0/include">
+					<flag value="BUILTIN|READONLY"/>
+				</entry>
+				<entry kind="includePath" name="#undef _REENTRANT">
 					<flag value="BUILTIN|READONLY"/>
 				</entry>
 				<entry kind="includePath" name="C:/Program Files/MinGW64/lib/gcc/x86_64-w64-mingw32/8.1.0/include-fixed">
@@ -2310,7 +2313,7 @@
 				</entry>
 			</language>
 		</provider>
-		<provider class="org.eclipse.cdt.managedbuilder.language.settings.providers.GCCBuiltinSpecsDetector" console="false" env-hash="-569832864316888943" id="org.eclipse.cdt.managedbuilder.core.GCCBuiltinSpecsDetector" keep-relative-paths="false" name="CDT GCC Built-in Compiler Settings" parameter="${COMMAND} ${FLAGS} -E -P -v -dD &quot;${INPUTS}&quot;">
+		<provider class="org.eclipse.cdt.managedbuilder.language.settings.providers.GCCBuiltinSpecsDetector" console="false" env-hash="-1185435215394578518" id="org.eclipse.cdt.managedbuilder.core.GCCBuiltinSpecsDetector" keep-relative-paths="false" name="CDT GCC Built-in Compiler Settings" parameter="${COMMAND} ${FLAGS} -E -P -v -dD &quot;${INPUTS}&quot;">
 			<language-scope id="org.eclipse.cdt.core.gcc"/>
 			<language-scope id="org.eclipse.cdt.core.g++"/>
 			<language id="org.eclipse.cdt.core.gcc">
