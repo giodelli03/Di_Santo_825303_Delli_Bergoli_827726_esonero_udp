@@ -151,10 +151,38 @@ float get_pressure(void)
     return rand_range(950.0f, 1050.0f);
 }
 
+int resolve_client_address(struct in_addr *addr, char *hostname_out,
+                           size_t hostname_size, char *ip_out, size_t ip_size) {
+	if (!addr || !hostname_out || !ip_out) {
+		return -1;
+	}
+
+	// IP come stringa
+	char *ip_str = inet_ntoa(*addr);
+	strncpy(ip_out, ip_str, ip_size - 1);
+	ip_out[ip_size - 1] = '\0';
+
+	// Reverse lookup: IP -> hostname
+	struct hostent *host = gethostbyaddr((char *)addr, sizeof(struct in_addr), AF_INET);
+
+	if (!host) {
+		// Fallback: usa IP come hostname
+		strncpy(hostname_out, ip_str, hostname_size - 1);
+		hostname_out[hostname_size - 1] = '\0';
+	} else {
+		strncpy(hostname_out, host->h_name, hostname_size - 1);
+		hostname_out[hostname_size - 1] = '\0';
+	}
+
+	return 0;
+}
+
+
 int main(int argc, char *argv[])
 {
     /* ./server-project [-p port] */
     int listen_port = SERVER_PORT;
+
     for (int i = 1; i < argc; ++i)
     {
         if (strcmp(argv[i], "-p") == 0)
@@ -186,7 +214,6 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    /* --- CREAZIONE SOCKET UDP --- */
     int my_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP); // UDP
     if (my_socket < 0)
     {
@@ -195,7 +222,6 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    /* --- BIND DELLA SOCKET UDP SU IP/PORTA --- */
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
@@ -222,7 +248,6 @@ int main(int argc, char *argv[])
         char data[BUFFER_SIZE];
         memset(data, 0, BUFFER_SIZE);
 
-        /* --- RICEZIONE DATAGRAM DA QUALUNQUE CLIENT --- */
         int bytes_rcvd = recvfrom(my_socket,
                                   data,
                                   BUFFER_SIZE - 1,
@@ -232,15 +257,21 @@ int main(int argc, char *argv[])
         if (bytes_rcvd < 0)
         {
             errorhandler("recvfrom() failed \n");
-            /* si può continuare o uscire, qui esco per semplicità */
             closesocket(my_socket);
             clearwinsock();
             return -1;
         }
+
         data[bytes_rcvd] = '\0';
 
-        printf("Richiesta \"%s\" dal client ip %s\n",
-               data, inet_ntoa(client_addr.sin_addr));
+		char client_hostname[256];
+		char client_ip[16];
+
+		resolve_client_address(&client_addr.sin_addr, client_hostname,
+		                      sizeof(client_hostname), client_ip, sizeof(client_ip));
+
+        printf("Richiesta \"%s\" da %s (ip %s)\n",
+               data,client_hostname, inet_ntoa(client_addr.sin_addr));
 
         weather_request_t req;
         weather_response_t res;

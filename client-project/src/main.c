@@ -78,6 +78,48 @@ void parse_weather_request(const char *input, weather_request_t *req)
 	return;
 }
 
+int resolve_dns(const char *input, char *hostname_out, size_t hostname_size, char *ip_out, size_t ip_size) {
+	if (!input || !hostname_out || !ip_out) {
+		return -1;
+	}
+
+	struct hostent *host = NULL;
+	struct in_addr addr;
+
+	addr.s_addr = inet_addr(input);
+
+	if (addr.s_addr == INADDR_NONE) {
+		host = gethostbyname(input);
+		if (!host) {
+			fprintf(stderr, "Errore: impossibile risolvere l'hostname '%s'.\n", input);
+			return -1;
+		}
+
+		struct in_addr *resolved_addr = (struct in_addr *)host->h_addr_list[0];
+		strncpy(ip_out, inet_ntoa(*resolved_addr), ip_size - 1);
+		ip_out[ip_size - 1] = '\0';
+
+		strncpy(hostname_out, host->h_name, hostname_size - 1);
+		hostname_out[hostname_size - 1] = '\0';
+
+	} else {
+		host = gethostbyaddr((char *)&addr, sizeof(addr), AF_INET);
+
+		if (!host) {
+			strncpy(hostname_out, input, hostname_size - 1);
+			hostname_out[hostname_size - 1] = '\0';
+		} else {
+			strncpy(hostname_out, host->h_name, hostname_size - 1);
+			hostname_out[hostname_size - 1] = '\0';
+		}
+
+		strncpy(ip_out, input, ip_size - 1);
+		ip_out[ip_size - 1] = '\0';
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	const char *server_str = SERVER_IP;
@@ -149,6 +191,14 @@ int main(int argc, char *argv[])
 	}
 #endif
 
+	char server_hostname[256];
+	char server_ip[16];
+
+	if (resolve_dns(SERVER_IP, server_hostname, sizeof(server_hostname), server_ip, sizeof(server_ip)) != 0) {
+		clearwinsock();
+		return 1;
+	}
+
 	int my_socket;
 
 	my_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP); // UDP
@@ -164,24 +214,8 @@ int main(int argc, char *argv[])
 	struct sockaddr_in server_addr;
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-
-	unsigned long addr = inet_addr(server_str);
-
-	if (addr == INADDR_NONE)
-	{
-		struct hostent *he = gethostbyname(server_str);
-		if (!he || !he->h_addr_list || !he->h_addr_list[0])
-		{
-			fprintf(stderr, "Unable to resolve host: %s\n", server_str);
-			return 1;
-		}
-		memcpy(&server_addr.sin_addr.s_addr, he->h_addr_list[0], he->h_length);
-	}
-	else
-	{
-		server_addr.sin_addr.s_addr = addr;
-	}
 	server_addr.sin_port = htons((unsigned short)server_port);
+	server_addr.sin_addr.s_addr = inet_addr(server_ip);
 
 	int msglen = (int)strlen(request_arg) + 1;
 	int sent = sendto(my_socket,
@@ -227,7 +261,7 @@ int main(int argc, char *argv[])
 	weather_response_t res;
 	parse_weather_response(buf, &res);
 
-	printf("Ricevuto risultato dal server ip %s. ",
+	printf("Ricevuto risultato dal server %s (ip %s). ", server_hostname,
 		   inet_ntoa(from_addr.sin_addr));
 
 	switch (res.status)
