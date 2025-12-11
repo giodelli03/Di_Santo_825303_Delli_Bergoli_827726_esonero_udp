@@ -157,16 +157,13 @@ int resolve_client_address(struct in_addr *addr, char *hostname_out,
 		return -1;
 	}
 
-	// IP come stringa
 	char *ip_str = inet_ntoa(*addr);
 	strncpy(ip_out, ip_str, ip_size - 1);
 	ip_out[ip_size - 1] = '\0';
 
-	// Reverse lookup: IP -> hostname
 	struct hostent *host = gethostbyaddr((char *)addr, sizeof(struct in_addr), AF_INET);
 
 	if (!host) {
-		// Fallback: usa IP come hostname
 		strncpy(hostname_out, ip_str, hostname_size - 1);
 		hostname_out[hostname_size - 1] = '\0';
 	} else {
@@ -200,7 +197,6 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Missing value for -p\n");
             return 1;
         }
-        /* ignore unknown arguments */
     }
 
 #if defined WIN32
@@ -318,13 +314,11 @@ int main(int argc, char *argv[])
         if (format_weather_response(&res, outbuf, BUFFER_SIZE) != 0)
         {
             errorhandler("format_weather_response() failed\n");
-            /* si può decidere di non rispondere o mandare errore generico */
             continue;
         }
 
         int msglen = (int)strlen(outbuf) + 1;
 
-        /* --- INVIO RISPOSTA ALLO STESSO CLIENT (stesso IP/porta) --- */
         int sent = sendto(my_socket,
                           outbuf,
                           msglen,
@@ -334,12 +328,10 @@ int main(int argc, char *argv[])
         if (sent < 0 || sent != msglen)
         {
             errorhandler("sendto() failed or sent different number of bytes \n");
-            /* si continua ad accettare altre richieste */
             continue;
         }
     }
 
-    /* codice non raggiunto in questo loop infinito */
     printf("Server terminated... \n");
     closesocket(my_socket);
     clearwinsock();
